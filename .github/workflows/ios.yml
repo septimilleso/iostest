@@ -5,9 +5,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
+    env:
+      TAG: build-${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 
@@ -41,3 +46,20 @@ jobs:
         with:
           name: iostest-ipa
           path: build/iostest.ipa
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" build/iostest.ipa             --title "iostest $TAG"             --notes "Unsigned IPA from ${GITHUB_SHA::7}"             --target "$GITHUB_SHA"
+
+      - name: Gitea release
+        env:
+          GITEA_URL: https://git.septimilleso.uk
+          GITEA_REPO: septimilleso/iostest
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: |
+          if [ -z "$GITEA_TOKEN" ]; then echo "GITEA_TOKEN not set, skipping"; exit 0; fi
+          API="$GITEA_URL/api/v1/repos/$GITEA_REPO"
+          ID=$(curl -fsS -X POST "$API/releases"             -H "Authorization: token $GITEA_TOKEN" -H "Content-Type: application/json"             -d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"$GITHUB_SHA\",\"name\":\"iostest $TAG\",\"body\":\"Unsigned IPA from ${GITHUB_SHA::7}\"}"             | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
+          curl -fsS -X POST "$API/releases/$ID/assets?name=iostest.ipa"             -H "Authorization: token $GITEA_TOKEN" -F "attachment=@build/iostest.ipa"
